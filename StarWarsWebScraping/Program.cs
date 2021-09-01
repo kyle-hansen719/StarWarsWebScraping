@@ -1,5 +1,6 @@
 ﻿using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
+using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,32 +13,25 @@ namespace StarWarsWebScraping
 
         static void Main(string[] args)
         {
+            // Change this to get all characters then get their relationships.
             var scraper = new Scraper();
 
-            var urls = new List<string>();
+            var Characters = scraper.GetAllCharacters();
 
-            string nextPageUrl = "https://starwars.fandom.com/wiki/Special:AllPages";
-            while (nextPageUrl != null)
+            using (var context = new StarWarsContext())
             {
-                var page = scraper.GetArticlePage(nextPageUrl);
-                urls.AddRange(page.ArticleUrls);
-
-                urls.ForEach(x => Console.WriteLine(x));
-
-                nextPageUrl = page.NextPageUrl;
+                context.AddRange(Characters.Characters);
+                context.AddRange(Characters.Relationships);
+                context.SaveChanges();
             }
-
-            File.WriteAllLines("urls.txt", urls);
-
-            Console.ReadLine();
         }
     }
 
     public class Scraper
     {
-        private ChromeDriver _driver;
+        private readonly ChromeDriver _driver;
 
-        private string WookiepeediaBaseUrl = "https://starwars.fandom.com/wiki/";
+        private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com/wiki";
 
         public Scraper()
         {
@@ -45,34 +39,80 @@ namespace StarWarsWebScraping
         }
 
         // Returns all characters and their information
-        public List<Character> GetAllCharacters()
+        public (List<Character> Characters, List<CharacterRelationship> Relationships) GetAllCharacters()
         {
-            _driver.Close();
+            var articleUrls = GetAllArticleUrls();
 
-            throw new NotImplementedException();
+            var characters = new List<Character>();
+            var relationships = new List<CharacterRelationship>();
+
+            foreach (var url in articleUrls)
+            {
+                try
+                {
+                    var character = GetCharacter(url);
+                    characters.Add(character.Character);
+                    relationships.AddRange(character.Relationships);
+                }
+                catch (NotFoundException exception)
+                {
+                    // GetCharacter throws NotFound if the article is not a character article.
+                    continue;
+                }
+            }
+
+            _driver.Close();
+            return (characters, relationships);
         }
 
         // gets a characters page and returns their information
-        private Character GetCharacterPage(string url)
+        private (Character Character, List<CharacterRelationship> Relationships) GetCharacter(string url)
+        {
+            _driver.Navigate().GoToUrl(url);
+
+            // TODO: Fix this (checking if the article is a character article)
+            var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
+            if (!infoTab.Text.Contains("Gender")) throw new NotFoundException("This article is not a character article.");
+
+            var relationships = GetCharacterRelationships();
+
+            var character = new Character
+            {
+                CharacterName = _driver.FindElementById("firstHeading").Text,
+                Url = url,
+            };
+
+            return (character, relationships);
+        }
+
+        // Takes the div that represents the main text box for characters
+        private List<CharacterRelationship> GetCharacterRelationships(IWebElement characterInfoDiv)
         {
             // TODO: Do this
-            var driver = new ChromeDriver(url);
+            var relationships = new List<CharacterRelationship>();
 
-            throw new NotImplementedException();
+            return relationships;
         }
 
         // Gets the urls of all articles on Wookieepedia
-        private List<string> GetUrls()
+        private List<string> GetAllArticleUrls()
         {
-            // TODO: get all character urls and names
             var urls = new List<string>();
 
-            throw new NotImplementedException();
+            string nextPageUrl = $"{WookiepeediaBaseUrl}/Special:AllPages";
+            while (nextPageUrl != null)
+            {
+                var page = GetArticlePage(nextPageUrl);
+                urls.AddRange(page.ArticleUrls);
+                nextPageUrl = page.NextPageUrl;
+            }
 
+            Console.WriteLine("Finished Getting All Urls");
+            return urls;
         }
 
         // Gets a single page of urls and returns the url to the next page
-        public (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url)
+        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url)
         {
             _driver.Navigate().GoToUrl(url);
             var nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
@@ -84,20 +124,5 @@ namespace StarWarsWebScraping
 
             return (nextPageUrl, articleUrls);
         }
-        
-        // Removes non-character urls from the list of urls
-        private List<string> FilterCharacterUrls(List<string> urls)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
-    public class Character
-    {
-        public int Id { get; set; }
-        public string CharacterName { get; set; }
-        public string Url { get; set; }
-
-        public List<int> Characters { get; set; }
     }
 }

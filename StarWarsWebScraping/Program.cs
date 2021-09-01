@@ -1,4 +1,6 @@
-﻿using System;
+﻿using OpenQA.Selenium.Chrome;
+using StarWarsWebScraping.Entities;
+using System;
 
 namespace StarWarsWebScraping
 {
@@ -7,18 +9,20 @@ namespace StarWarsWebScraping
 
         static void Main(string[] args)
         {
-            // Change this to get all characters then get their relationships.
-            var scraper = new Scraper();
+            // Sets up Selenium with chromedriver.exe
+            // Make sure ChromeDriver.exe is in the StarWarsWebScraping folder
+            var scraper = new Scraper(new ChromeDriver(Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", "")));
 
+            // Change this to get all characters then get their relationships.
             var characters = scraper.GetAllCharacters();
 
             using (var context = new StarWarsContext())
             {
-                context.AddRange(characters);
-                //context.AddRange(Characters.Characters);
-                //context.AddRange(Characters.Relationships);
+                context.Characters.AddRange(characters);
                 context.SaveChanges();
             }
+
+            // TODO: Add character relationships
         }
     }
 }

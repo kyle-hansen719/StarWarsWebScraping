@@ -1,5 +1,6 @@
 ﻿using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Remote;
 using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
@@ -9,14 +10,13 @@ namespace StarWarsWebScraping
 {
     class Scraper
     {
-        private readonly ChromeDriver _driver;
+        private readonly RemoteWebDriver _driver;
 
         private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com/wiki";
 
-        public Scraper()
+        public Scraper(RemoteWebDriver driver)
         {
-            // Make sure ChromeDriver.exe is in the StarWarsWebScraping folder
-            _driver = new ChromeDriver(Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", ""));
+            _driver = driver;
         }
 
         // Returns all characters and their information
@@ -30,6 +30,9 @@ namespace StarWarsWebScraping
                 {
                     var character = GetCharacter(x);
                     characters.Add(character);
+
+                    // Status Log
+                    Console.WriteLine($"Got: {character.CharacterName}");
                 }
                 catch (NotFoundException exception)
                 {
@@ -41,6 +44,81 @@ namespace StarWarsWebScraping
             _driver.Close();
             return characters;
         }
+
+        //{
+        //    var articleUrls = GetAllArticleUrls();
+
+        //    var characters = new List<Character>();
+        //    var relationships = new List<CharacterRelationship>();
+
+        //    foreach (var url in articleUrls)
+        //    {
+        //        try
+        //        {
+        //            var character = GetCharacter(url);
+        //            characters.Add(character.Character);
+        //            relationships.AddRange(character.Relationships);
+        //        }
+        //        catch (NotFoundException exception)
+        //        {
+        //            // GetCharacter throws NotFound if the article is not a character article.
+        //            continue;
+        //        }
+        //    }
+
+        //    _driver.Close();
+        //    return (characters, relationships);
+        //}
+
+        //{
+        //    var articleUrls = GetAllArticleUrls();
+
+        //    var characters = new List<Character>();
+        //    var relationships = new List<CharacterRelationship>();
+
+        //    foreach (var url in articleUrls)
+        //    {
+        //        try
+        //        {
+        //            var character = GetCharacter(url);
+        //            characters.Add(character.Character);
+        //            relationships.AddRange(character.Relationships);
+        //        }
+        //        catch (NotFoundException exception)
+        //        {
+        //            // GetCharacter throws NotFound if the article is not a character article.
+        //            continue;
+        //        }
+        //    }
+
+        //    _driver.Close();
+        //    return (characters, relationships);
+        //}
+
+        //{
+        //    var articleUrls = GetAllArticleUrls();
+
+        //    var characters = new List<Character>();
+        //    var relationships = new List<CharacterRelationship>();
+
+        //    foreach (var url in articleUrls)
+        //    {
+        //        try
+        //        {
+        //            var character = GetCharacter(url);
+        //            characters.Add(character.Character);
+        //            relationships.AddRange(character.Relationships);
+        //        }
+        //        catch (NotFoundException exception)
+        //        {
+        //            // GetCharacter throws NotFound if the article is not a character article.
+        //            continue;
+        //        }
+        //    }
+
+        //    _driver.Close();
+        //    return (characters, relationships);
+        //}
 
         // gets a characters page and returns their information
         private Character GetCharacter(string url)
@@ -59,7 +137,7 @@ namespace StarWarsWebScraping
         }
 
         // Takes the div that represents the main text box for characters
-        private List<CharacterRelationship> GetCharacterRelationships(IWebElement characterInfoDiv)
+        private List<CharacterRelationship> GetCharacterRelationships(List<string> urls)
         {
             // TODO: Do this
             var relationships = new List<CharacterRelationship>();

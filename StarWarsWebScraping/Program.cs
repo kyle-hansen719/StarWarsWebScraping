@@ -1,4 +1,6 @@
-﻿namespace StarWarsWebScraping
+﻿using System;
+
+namespace StarWarsWebScraping
 {
     class Program
     {

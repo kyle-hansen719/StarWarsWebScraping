@@ -15,7 +15,8 @@ namespace StarWarsWebScraping
 
         public Scraper()
         {
-            _driver = new ChromeDriver();
+            // Make sure ChromeDriver.exe is in the StarWarsWebScraping folder
+            _driver = new ChromeDriver(Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", ""));
         }
 
         // Returns all characters and their information

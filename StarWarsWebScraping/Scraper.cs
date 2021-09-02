@@ -22,103 +22,14 @@ namespace StarWarsWebScraping
         // Returns all characters and their information
         public List<Character> GetAllCharacters()
         {
-            var characters = new List<Character>();
-
-            GetAllArticleUrls().ForEach(x =>
-            {
-                try
-                {
-                    var character = GetCharacter(x);
-                    characters.Add(character);
-
-                    // Status Log
-                    Console.WriteLine($"Got: {character.CharacterName}");
-                }
-                catch (NotFoundException exception)
-                {
-                    // GetCharacter throws NotFound if the article is not a character article.
-                }
-            });
-
+            var characters = GetAllArticleUrls()
+                .Select(x => GetCharacter(x))
+                .Where(x => x != null)
+                .ToList();
 
             _driver.Close();
             return characters;
         }
-
-        //{
-        //    var articleUrls = GetAllArticleUrls();
-
-        //    var characters = new List<Character>();
-        //    var relationships = new List<CharacterRelationship>();
-
-        //    foreach (var url in articleUrls)
-        //    {
-        //        try
-        //        {
-        //            var character = GetCharacter(url);
-        //            characters.Add(character.Character);
-        //            relationships.AddRange(character.Relationships);
-        //        }
-        //        catch (NotFoundException exception)
-        //        {
-        //            // GetCharacter throws NotFound if the article is not a character article.
-        //            continue;
-        //        }
-        //    }
-
-        //    _driver.Close();
-        //    return (characters, relationships);
-        //}
-
-        //{
-        //    var articleUrls = GetAllArticleUrls();
-
-        //    var characters = new List<Character>();
-        //    var relationships = new List<CharacterRelationship>();
-
-        //    foreach (var url in articleUrls)
-        //    {
-        //        try
-        //        {
-        //            var character = GetCharacter(url);
-        //            characters.Add(character.Character);
-        //            relationships.AddRange(character.Relationships);
-        //        }
-        //        catch (NotFoundException exception)
-        //        {
-        //            // GetCharacter throws NotFound if the article is not a character article.
-        //            continue;
-        //        }
-        //    }
-
-        //    _driver.Close();
-        //    return (characters, relationships);
-        //}
-
-        //{
-        //    var articleUrls = GetAllArticleUrls();
-
-        //    var characters = new List<Character>();
-        //    var relationships = new List<CharacterRelationship>();
-
-        //    foreach (var url in articleUrls)
-        //    {
-        //        try
-        //        {
-        //            var character = GetCharacter(url);
-        //            characters.Add(character.Character);
-        //            relationships.AddRange(character.Relationships);
-        //        }
-        //        catch (NotFoundException exception)
-        //        {
-        //            // GetCharacter throws NotFound if the article is not a character article.
-        //            continue;
-        //        }
-        //    }
-
-        //    _driver.Close();
-        //    return (characters, relationships);
-        //}
 
         // gets a characters page and returns their information
         private Character GetCharacter(string url)
@@ -126,8 +37,16 @@ namespace StarWarsWebScraping
             _driver.Navigate().GoToUrl(url);
 
             // TODO: Fix this (checking if the article is a character article)
-            var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
-            if (!infoTab.Text.Contains("Gender")) throw new NotFoundException("This article is not a character article.");
+
+            try
+            {
+                var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
+                if (!infoTab.Text.Contains("Gender")) return null;
+            }
+            catch
+            {
+                return null;
+            }
 
             return new Character
             {
@@ -151,15 +70,15 @@ namespace StarWarsWebScraping
             var urls = new List<string>();
 
             string nextPageUrl = $"{WookiepeediaBaseUrl}/Special:AllPages";
-            // TODO: reinstate this while loop
-            //var page = GetArticlePage(nextPageUrl);
-            //urls.AddRange(page.ArticleUrls);
 
-            while (nextPageUrl != null)
+            // TODO: Get rid of i
+            var i = 0;
+            while (nextPageUrl != null && i < 5)
             {
                 var page = GetArticlePage(nextPageUrl);
                 urls.AddRange(page.ArticleUrls);
                 nextPageUrl = page.NextPageUrl;
+                i += 1;
             }
 
             Console.WriteLine("Finished Getting All Urls");
@@ -171,45 +90,39 @@ namespace StarWarsWebScraping
         {
             _driver.Navigate().GoToUrl(url);
 
-            // fix problem with looping back and forth between pages
-            var nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
+            var nextPageUrl = "";
+            try
+            {
+                nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
+            }
+            catch
+            {
+                nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
+            }
 
-            //var articleUrls = _driver.FindElementByClassName("mw-allpages-chunk")
-            //    .FindElements(By.TagName("li"))
-            //    .ToList()
-            //    .Select(x => x.FindElement(By.TagName("a")).GetAttribute("href"));
-
-            var articleUrls = GetAllArticleLinksFromBody(_driver.FindElementByClassName("mw-allpages-chunk").GetAttribute("innerHTML"), 0);
+            var articleUrls = GetAllArticleLinksFromBody(_driver
+                .FindElementByClassName("mw-allpages-chunk")
+                .GetAttribute("innerHTML")
+                .Replace("\n", "")
+                .Replace("\r", ""));
 
             return (nextPageUrl, articleUrls);
         }
 
-        private List<string> GetAllArticleLinksFromBody(string htmlBody, int numRuns, List<string> urls = null)
+        private List<string> GetAllArticleLinksFromBody(string htmlBody, List<string> urls = null)
         {
+            // TODO: this code is bad and confusing
             urls ??= new List<string>();
             var hrefTagString = "href=\"";
+            if (!htmlBody.Contains(hrefTagString)) return urls;
 
-            // TODO: this code is bad and confusing
+            var openingIndex = htmlBody.IndexOf(hrefTagString) + hrefTagString.Length;
+            // Url length is first instance of '" ' after the first instance of 'href="'
+            var urlLength = htmlBody.Substring(openingIndex).IndexOf("\"");
 
-            // remove numRuns
-            if (!htmlBody.Contains(hrefTagString) || numRuns > 20) return urls;
+            urls.Add(WookiepeediaBaseUrl + htmlBody.Substring(openingIndex, urlLength));
 
-            var openingIndex = htmlBody.IndexOf(hrefTagString);
-
-            ////
-            //var hrefTagLength = hrefTagString.Length;
-            //var opening = openingIndex + hrefTagString.Length;
-            //var length = htmlBody.Length;
-            //var closing = htmlBody.Length - openingIndex + hrefTagString.Length;
-            //var substring = htmlBody.Substring(openingIndex + hrefTagString.Length, htmlBody.Length - openingIndex + hrefTagString.Length);
-            ////
-
-            var closingIndex = htmlBody.Substring(openingIndex + hrefTagString.Length).IndexOf("\" ");
-
-            // openingIndex + closingIndex
-            urls.Add(htmlBody.Substring(openingIndex + hrefTagString.Length, closingIndex));
-
-            return GetAllArticleLinksFromBody(htmlBody.Substring(closingIndex), numRuns, urls);
+            return GetAllArticleLinksFromBody(htmlBody.Substring(openingIndex + urlLength), urls);
         }
 
         // TODO: Get character details

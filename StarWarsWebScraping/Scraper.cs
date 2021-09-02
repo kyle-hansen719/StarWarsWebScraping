@@ -12,7 +12,7 @@ namespace StarWarsWebScraping
     {
         private readonly RemoteWebDriver _driver;
 
-        private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com/wiki";
+        private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com";
 
         public Scraper(RemoteWebDriver driver)
         {
@@ -20,9 +20,9 @@ namespace StarWarsWebScraping
         }
 
         // Returns all characters and their information
-        public List<Character> GetAllCharacters()
+        public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
         {
-            var characters = GetAllArticleUrls()
+            var characters = GetAllArticleUrls(numArticlePages)
                 .Select(x => GetCharacter(x))
                 .Where(x => x != null)
                 .ToList();
@@ -65,15 +65,15 @@ namespace StarWarsWebScraping
         }
 
         // Gets the urls of all articles on Wookieepedia
-        private List<string> GetAllArticleUrls()
+        private List<string> GetAllArticleUrls(int numPages)
         {
             var urls = new List<string>();
 
-            string nextPageUrl = $"{WookiepeediaBaseUrl}/Special:AllPages";
+            string nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
 
             // TODO: Get rid of i
             var i = 0;
-            while (nextPageUrl != null && i < 5)
+            while (nextPageUrl != null && i < numPages)
             {
                 var page = GetArticlePage(nextPageUrl);
                 urls.AddRange(page.ArticleUrls);
@@ -93,6 +93,7 @@ namespace StarWarsWebScraping
             var nextPageUrl = "";
             try
             {
+                // TODO: replace this xpath call with another selector if i can
                 nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
             }
             catch
@@ -126,5 +127,14 @@ namespace StarWarsWebScraping
         }
 
         // TODO: Get character details
+        public IEnumerable<CharacterRelationship> GetCharacterRelationships()
+        {
+            using var context = new StarWarsContext();
+
+            var characters = context.Characters.ToList();
+
+
+            throw new NotImplementedException();
+        }
     }
 }

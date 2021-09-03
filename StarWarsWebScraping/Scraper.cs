@@ -20,6 +20,11 @@ namespace StarWarsWebScraping
             _driver = driver;
         }
 
+        public void CloseDriver()
+        {
+            _driver.Close();
+        }
+
         // Returns all characters articles
         public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
         {
@@ -28,7 +33,6 @@ namespace StarWarsWebScraping
                 .Where(x => x != null)
                 .ToList();
 
-            _driver.Close();
             return characters;
         }
 
@@ -66,7 +70,7 @@ namespace StarWarsWebScraping
             var i = 0;
             while (nextPageUrl != null && i < numPages)
             {
-                var page = GetArticlePage(nextPageUrl);
+                var page = GetArticlePage(nextPageUrl, i == 0);
                 urls.AddRange(page.ArticleUrls);
                 nextPageUrl = page.NextPageUrl;
                 i += 1;
@@ -77,11 +81,11 @@ namespace StarWarsWebScraping
         }
 
         // Gets a single page of urls and returns the url to the next page
-        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url)
+        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url, bool isFirstPage)
         {
             _driver.Navigate().GoToUrl(url);
 
-            var nextPageUrl = "";
+            string nextPageUrl = null;
             try
             {
                 // TODO: replace this xpath call with another selector if i can
@@ -89,7 +93,9 @@ namespace StarWarsWebScraping
             }
             catch
             {
-                nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
+                // On the first page, the next page button is this but on the last page this is the previous button so I need to only set next page to this
+                // when this is the first page
+                if (isFirstPage) nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
             }
 
             var articleUrls = GetAllTagsFromBody(_driver
@@ -101,13 +107,11 @@ namespace StarWarsWebScraping
             return (nextPageUrl, articleUrls);
         }
 
-        public List<CharacterRelationship> GetCharacterRelationships()
+        public void GetCharacterRelationships()
         {
             using var context = new StarWarsContext();
 
             var characters = context.Characters.ToList();
-            var characterRelationships = new List<CharacterRelationship>();
-
             foreach (var character in characters)
             {
                 _driver.Navigate().GoToUrl(character.Url);
@@ -118,33 +122,32 @@ namespace StarWarsWebScraping
                     .FindElementByClassName("mw-parser-output")
                     .GetAttribute("innerHTML")
                     .Replace("\n", "")
-                    .Replace("\r", ""), "href");
+                    .Replace("\r", ""), "href")
+                    .Select(x => $"('{x}')");
 
-                context.CreateRelationships.FromSql(@"
+                var query = $@"
                     DECLARE @characterId INT
-
+                        SET @characterId = {character.Id}
+                    IF OBJECT_ID('tempdb..#hyperlinks') IS NOT NULL DROP TABLE #hyperlinks
                     CREATE TABLE #hyperlinks (
                         hyperlink NVARCHAR(MAX)
                     );
 
                     INSERT INTO #hyperlinks (hyperlink)
-                    	VALUES()
+                    	VALUES {string.Join(',', characterHyperlinks)}
                     
                     INSERT INTO
-                    
                         dbo.Relationships(CharacterId, HyperlinkCharacterId)
                     SELECT
                         @characterId,
                         Id
                     FROM
-                    
                         dbo.Characters
                     WHERE
-                    
-                        Url IN(SELECT* FROM #hyperlinks)");
-            }
+                        Url IN(SELECT* FROM #hyperlinks)";
 
-            return characterRelationships;
+                context.Database.ExecuteSqlRaw(query);
+            }
         }
 
         // htmlTag is just "href", "a", etc.

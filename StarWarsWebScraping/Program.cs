@@ -14,13 +14,14 @@ namespace StarWarsWebScraping
             var scraper = new Scraper(new ChromeDriver(Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", "")));
 
             using var context = new StarWarsContext();
-            context.Characters.AddRange(scraper.GetAllCharacters(1));
+            context.Characters.AddRange(scraper.GetAllCharacters());
             context.SaveChanges();
 
             // Make sure GetRelationships is called after GetCharacters because relationships requires db data
             // might want to fix this later
-            context.Relationships.AddRange(scraper.GetCharacterRelationships());
-            context.SaveChanges();
+            scraper.GetCharacterRelationships();
+
+            scraper.CloseDriver();
         }
     }
 }

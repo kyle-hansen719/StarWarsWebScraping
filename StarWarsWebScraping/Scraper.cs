@@ -19,7 +19,7 @@ namespace StarWarsWebScraping
             _driver = driver;
         }
 
-        // Returns all characters and their information
+        // Returns all characters articles
         public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
         {
             var characters = GetAllArticleUrls(numArticlePages)
@@ -37,7 +37,6 @@ namespace StarWarsWebScraping
             _driver.Navigate().GoToUrl(url);
 
             // TODO: Fix this (checking if the article is a character article)
-
             try
             {
                 var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
@@ -53,15 +52,6 @@ namespace StarWarsWebScraping
                 CharacterName = _driver.FindElementById("firstHeading").Text,
                 Url = url
             };
-        }
-
-        // Takes the div that represents the main text box for characters
-        private List<CharacterRelationship> GetCharacterRelationships(List<string> urls)
-        {
-            // TODO: Do this
-            var relationships = new List<CharacterRelationship>();
-
-            return relationships;
         }
 
         // Gets the urls of all articles on Wookieepedia
@@ -101,20 +91,44 @@ namespace StarWarsWebScraping
                 nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
             }
 
-            var articleUrls = GetAllArticleLinksFromBody(_driver
+            var articleUrls = GetAllTagsFromBody(_driver
                 .FindElementByClassName("mw-allpages-chunk")
                 .GetAttribute("innerHTML")
                 .Replace("\n", "")
-                .Replace("\r", ""));
+                .Replace("\r", ""), "href");
 
             return (nextPageUrl, articleUrls);
         }
 
-        private List<string> GetAllArticleLinksFromBody(string htmlBody, List<string> urls = null)
+        public List<CharacterRelationship> GetCharacterRelationships()
+        {
+            using var context = new StarWarsContext();
+
+            var characters = context.Characters.ToList();
+            var characterRelationships = new List<CharacterRelationship>();
+
+            foreach (var character in characters)
+            {
+                _driver.Navigate().GoToUrl(character.Url);
+
+                // TODO: benchmark linq to entities vs normal linq for hyperlink to character link
+                // TODO: find a way to narrow down the character text search
+                var articleUrls = GetAllTagsFromBody(_driver
+                    .FindElementByClassName("mw-parser-output")
+                    .GetAttribute("innerHTML")
+                    .Replace("\n", "")
+                    .Replace("\r", ""), "href");
+            }
+
+            return characterRelationships;
+        }
+
+        // htmlTag is just "href", "a", etc.
+        private List<string> GetAllTagsFromBody(string htmlBody, string htmlTag, List<string> urls = null)
         {
             // TODO: this code is bad and confusing
             urls ??= new List<string>();
-            var hrefTagString = "href=\"";
+            var hrefTagString = $"{htmlTag}=\"";
             if (!htmlBody.Contains(hrefTagString)) return urls;
 
             var openingIndex = htmlBody.IndexOf(hrefTagString) + hrefTagString.Length;
@@ -123,18 +137,7 @@ namespace StarWarsWebScraping
 
             urls.Add(WookiepeediaBaseUrl + htmlBody.Substring(openingIndex, urlLength));
 
-            return GetAllArticleLinksFromBody(htmlBody.Substring(openingIndex + urlLength), urls);
-        }
-
-        // TODO: Get character details
-        public IEnumerable<CharacterRelationship> GetCharacterRelationships()
-        {
-            using var context = new StarWarsContext();
-
-            var characters = context.Characters.ToList();
-
-
-            throw new NotImplementedException();
+            return GetAllTagsFromBody(htmlBody.Substring(openingIndex + urlLength), htmlTag, urls);
         }
     }
 }

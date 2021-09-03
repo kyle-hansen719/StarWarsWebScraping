@@ -120,7 +120,28 @@ namespace StarWarsWebScraping
                     .Replace("\n", "")
                     .Replace("\r", ""), "href");
 
-                context.CreateRelationships.FromSql();
+                context.CreateRelationships.FromSql(@"
+                    DECLARE @characterId INT
+
+                    CREATE TABLE #hyperlinks (
+                        hyperlink NVARCHAR(MAX)
+                    );
+
+                    INSERT INTO #hyperlinks (hyperlink)
+                    	VALUES()
+                    
+                    INSERT INTO
+                    
+                        dbo.Relationships(CharacterId, HyperlinkCharacterId)
+                    SELECT
+                        @characterId,
+                        Id
+                    FROM
+                    
+                        dbo.Characters
+                    WHERE
+                    
+                        Url IN(SELECT* FROM #hyperlinks)");
             }
 
             return characterRelationships;

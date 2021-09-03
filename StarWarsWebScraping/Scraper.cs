@@ -5,6 +5,7 @@ using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.EntityFrameworkCore;
 
 namespace StarWarsWebScraping
 {
@@ -113,11 +114,13 @@ namespace StarWarsWebScraping
 
                 // TODO: benchmark linq to entities vs normal linq for hyperlink to character link
                 // TODO: find a way to narrow down the character text search
-                var articleUrls = GetAllTagsFromBody(_driver
+                var characterHyperlinks = GetAllTagsFromBody(_driver
                     .FindElementByClassName("mw-parser-output")
                     .GetAttribute("innerHTML")
                     .Replace("\n", "")
                     .Replace("\r", ""), "href");
+
+                context.CreateRelationships.FromSql();
             }
 
             return characterRelationships;

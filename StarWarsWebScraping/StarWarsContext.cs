@@ -2,6 +2,7 @@
 using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
+using System.Data.Entity.Infrastructure;
 using System.Text;
 
 namespace StarWarsWebScraping
@@ -10,6 +11,8 @@ namespace StarWarsWebScraping
     {
         public DbSet<Character> Characters { get; set; }
         public DbSet<CharacterRelationship> Relationships { get; set; }
+
+        public DbQuery<int> CreateRelationships { get; set; }
 
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {

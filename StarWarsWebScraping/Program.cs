@@ -21,26 +21,25 @@ namespace StarWarsWebScraping
             // Loads adblock to speed up page loading
             options.AddExtension(rootPath + "\\uBlock-Origin_v1.37.2.crx");
 
-            var drivers = Enumerable.Range(0, 4).Select(x => new DriverWithId { Id = x, Driver = new ChromeDriver(rootPath, options) });
+            var drivers = Enumerable.Range(0, 4).Select(x => new DriverWithId { Id = x, Driver = new ChromeDriver(rootPath, options) }).ToList();
+            using var context = new StarWarsContext();
 
-        //using var context = new StarWarsContext();
+            var scraper = new Scraper(drivers, context);
 
-        //var scraper = new Scraper(driver, context);
+            context.Characters.AddRange(scraper.GetAllCharacters());
+            context.SaveChanges();
 
-        //context.Characters.AddRange(scraper.GetAllCharacters());
-        //context.SaveChanges();
+            //// Make sure GetRelationships is called after GetCharacters because relationships requires db data
+            //// might want to fix this later
+            scraper.GetCharacterRelationships();
 
-        //// Make sure GetRelationships is called after GetCharacters because relationships requires db data
-        //// might want to fix this later
-        //scraper.GetCharacterRelationships();
-
-        //scraper.CloseDriver();
+            scraper.CloseDriver();
         }
     }
 
     public class DriverWithId
     {
-        public IWebDriver Driver { get; set; }
+        public ChromeDriver Driver { get; set; }
         public int Id { get; set; }
     }
 }

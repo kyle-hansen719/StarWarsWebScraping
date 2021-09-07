@@ -11,31 +11,38 @@ namespace StarWarsWebScraping
 {
     class Scraper
     {
-        private readonly RemoteWebDriver _driver;
+        private readonly List<DriverWithId> _drivers;
         private readonly StarWarsContext _context;
 
         private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com";
 
-        public Scraper(RemoteWebDriver driver, StarWarsContext context)
+        public Scraper(List<DriverWithId> drivers, StarWarsContext context)
         {
-            _driver = driver;
+            _drivers = drivers;
             _context = context;
         }
 
         public void CloseDriver()
         {
-            _driver.Close();
+            _drivers.ForEach(x => x.Driver.Close());
         }
 
         // Returns all characters articles
         public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
         {
-            // checks if data exists in the database already
-            var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
-            var lastArticleCheckedId = _context.ArticleUrls.Where(x => x.Url == lastCharacterUrl).Select(x => x.Id).FirstOrDefault();
-            var articleUrls = _context.ArticleUrls.Any() 
-                ? _context.ArticleUrls.Where(x => x.Id > lastArticleCheckedId).Select(x => x.Url).ToList() 
-                : GetAllArticleUrls(numArticlePages);
+            //// checks if data exists in the database already
+            //var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
+            //var lastArticleCheckedId = _context.ArticleUrls.Where(x => x.Url == lastCharacterUrl).Select(x => x.Id).FirstOrDefault();
+            //var articleUrls = _context.ArticleUrls.Any() 
+            //    ? _context.ArticleUrls.Where(x => x.Id > lastArticleCheckedId).Select(x => x.Url).ToList() 
+            //    : GetAllArticleUrls(numArticlePages);
+
+            if (!_context.ArticleUrls.Any())
+            {
+                GetAllArticleUrls(numArticlePages);
+            }
+
+            var articleUrls = _context.ArticleUrls.ToList();
 
             var characters = articleUrls
                 .Select(x => GetCharacter(x))
@@ -46,20 +53,22 @@ namespace StarWarsWebScraping
         }
 
         // gets a characters page and returns their information
-        private Character GetCharacter(string url)
+        private Character GetCharacter(ArticleUrl article)
         {
-            _driver.Navigate().GoToUrl(url);
+            var driver = GetDriverFromIterator(article.Id);
+
+            driver.Navigate().GoToUrl(article.Url);
 
             // TODO: Fix this (checking if the article is a character article)
             try
             {
-                var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
+                var infoTab = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
                 if (!infoTab.Text.Contains("Gender")) return null;
 
                 var character = new Character
                 {
-                    CharacterName = _driver.FindElementById("firstHeading").Text,
-                    Url = url
+                    CharacterName = driver.FindElementById("firstHeading").Text,
+                    Url = article.Url
                 };
 
                 _context.Characters.Add(character);
@@ -74,7 +83,7 @@ namespace StarWarsWebScraping
         }
 
         // Gets the urls of all articles on Wookieepedia
-        private List<string> GetAllArticleUrls(int numPages)
+        private void GetAllArticleUrls(int numPages)
         {
             var urls = new List<string>();
 
@@ -83,7 +92,9 @@ namespace StarWarsWebScraping
             var i = 0;
             while (nextPageUrl != null && i < numPages)
             {
-                var page = GetArticlePage(nextPageUrl, i == 0);
+                var driver = GetDriverFromIterator(i);
+
+                var page = GetArticlePage(nextPageUrl, i == 0, driver);
                 urls.AddRange(page.ArticleUrls);
                 nextPageUrl = page.NextPageUrl;
                 i += 1;
@@ -93,28 +104,27 @@ namespace StarWarsWebScraping
             _context.SaveChanges();
 
             Console.WriteLine("Finished Getting All Urls");
-            return urls;
         }
 
         // Gets a single page of urls and returns the url to the next page
-        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url, bool isFirstPage)
+        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url, bool isFirstPage, ChromeDriver driver)
         {
-            _driver.Navigate().GoToUrl(url);
+            driver.Navigate().GoToUrl(url);
 
             string nextPageUrl = null;
             try
             {
                 // TODO: replace this xpath call with another selector if i can
-                nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
+                nextPageUrl = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
             }
             catch
             {
                 // On the first page, the next page button is this but on the last page this is the previous button so I need to only set next page to this
                 // when this is the first page
-                if (isFirstPage) nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
+                if (isFirstPage) nextPageUrl = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
             }
 
-            var articleUrls = GetAllTagsFromBody(_driver
+            var articleUrls = GetAllTagsFromBody(driver
                 .FindElementByClassName("mw-allpages-chunk")
                 .GetAttribute("innerHTML")
                 .Replace("\n", "")
@@ -126,13 +136,15 @@ namespace StarWarsWebScraping
         public void GetCharacterRelationships()
         {
             var characters = _context.Characters.ToList();
-            foreach (var character in characters)
+            for (var i = 0; i < characters.Count; i++)
             {
-                _driver.Navigate().GoToUrl(character.Url);
+                var driver = GetDriverFromIterator(i);
+
+                driver.Navigate().GoToUrl(characters[i].Url);
 
                 // TODO: benchmark linq to entities vs normal linq for hyperlink to character link
                 // TODO: find a way to narrow down the character text search
-                var characterHyperlinks = GetAllTagsFromBody(_driver
+                var characterHyperlinks = GetAllTagsFromBody(driver
                     .FindElementByClassName("mw-parser-output")
                     .GetAttribute("innerHTML")
                     .Replace("\n", "")
@@ -141,7 +153,7 @@ namespace StarWarsWebScraping
 
                 var query = $@"
                     DECLARE @characterId INT
-                        SET @characterId = {character.Id}
+                        SET @characterId = {characters[i].Id}
                     IF OBJECT_ID('tempdb..#hyperlinks') IS NOT NULL DROP TABLE #hyperlinks
                     CREATE TABLE #hyperlinks (
                         hyperlink NVARCHAR(MAX)
@@ -179,6 +191,11 @@ namespace StarWarsWebScraping
             urls.Add(WookiepeediaBaseUrl + htmlBody.Substring(openingIndex, urlLength));
 
             return GetAllTagsFromBody(htmlBody.Substring(openingIndex + urlLength), htmlTag, urls);
+        }
+
+        private ChromeDriver GetDriverFromIterator(int iterator)
+        {
+            return _drivers[iterator % _drivers.Count].Driver;
         }
     }
 }

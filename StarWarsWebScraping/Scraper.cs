@@ -12,12 +12,14 @@ namespace StarWarsWebScraping
     class Scraper
     {
         private readonly RemoteWebDriver _driver;
+        private readonly StarWarsContext _context;
 
         private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com";
 
-        public Scraper(RemoteWebDriver driver)
+        public Scraper(RemoteWebDriver driver, StarWarsContext context)
         {
             _driver = driver;
+            _context = context;
         }
 
         public void CloseDriver()
@@ -28,7 +30,14 @@ namespace StarWarsWebScraping
         // Returns all characters articles
         public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
         {
-            var characters = GetAllArticleUrls(numArticlePages)
+            // checks if data exists in the database already
+            var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
+            var lastArticleCheckedId = _context.ArticleUrls.Where(x => x.Url == lastCharacterUrl).Select(x => x.Id).FirstOrDefault();
+            var articleUrls = _context.ArticleUrls.Any() 
+                ? _context.ArticleUrls.Where(x => x.Id > lastArticleCheckedId).Select(x => x.Url).ToList() 
+                : GetAllArticleUrls(numArticlePages);
+
+            var characters = articleUrls
                 .Select(x => GetCharacter(x))
                 .Where(x => x != null)
                 .ToList();
@@ -46,17 +55,22 @@ namespace StarWarsWebScraping
             {
                 var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
                 if (!infoTab.Text.Contains("Gender")) return null;
+
+                var character = new Character
+                {
+                    CharacterName = _driver.FindElementById("firstHeading").Text,
+                    Url = url
+                };
+
+                _context.Characters.Add(character);
+                _context.SaveChanges();
+
+                return character;
             }
             catch
             {
                 return null;
             }
-
-            return new Character
-            {
-                CharacterName = _driver.FindElementById("firstHeading").Text,
-                Url = url
-            };
         }
 
         // Gets the urls of all articles on Wookieepedia
@@ -66,7 +80,6 @@ namespace StarWarsWebScraping
 
             string nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
 
-            // TODO: Get rid of i
             var i = 0;
             while (nextPageUrl != null && i < numPages)
             {
@@ -75,6 +88,9 @@ namespace StarWarsWebScraping
                 nextPageUrl = page.NextPageUrl;
                 i += 1;
             }
+
+            _context.ArticleUrls.AddRange(urls.Select(x => new ArticleUrl { Url = x }));
+            _context.SaveChanges();
 
             Console.WriteLine("Finished Getting All Urls");
             return urls;
@@ -109,9 +125,7 @@ namespace StarWarsWebScraping
 
         public void GetCharacterRelationships()
         {
-            using var context = new StarWarsContext();
-
-            var characters = context.Characters.ToList();
+            var characters = _context.Characters.ToList();
             foreach (var character in characters)
             {
                 _driver.Navigate().GoToUrl(character.Url);
@@ -146,7 +160,7 @@ namespace StarWarsWebScraping
                     WHERE
                         Url IN(SELECT* FROM #hyperlinks)";
 
-                context.Database.ExecuteSqlRaw(query);
+                _context.Database.ExecuteSqlRaw(query);
             }
         }
 

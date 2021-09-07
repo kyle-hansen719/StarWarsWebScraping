@@ -1,4 +1,5 @@
 ﻿using OpenQA.Selenium.Chrome;
+using OpenQA.Selenium.Remote;
 using StarWarsWebScraping.Entities;
 using System;
 
@@ -11,9 +12,16 @@ namespace StarWarsWebScraping
         {
             // Sets up Selenium with chromedriver.exe
             // Make sure ChromeDriver.exe is in the StarWarsWebScraping folder
-            var scraper = new Scraper(new ChromeDriver(Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", "")));
-
+            var options = new ChromeOptions();
+            var rootPath = Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", "");
+            // Loads adblock to speed up page loading
+            options.AddExtension(rootPath + "\\uBlock-Origin_v1.37.2.crx");
+            var driver = new ChromeDriver(rootPath, options);
+            
             using var context = new StarWarsContext();
+
+            var scraper = new Scraper(driver, context);
+
             context.Characters.AddRange(scraper.GetAllCharacters());
             context.SaveChanges();
 

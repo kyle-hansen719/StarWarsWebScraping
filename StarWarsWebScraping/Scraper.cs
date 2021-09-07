@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.Tasks;
 
 namespace StarWarsWebScraping
 {
@@ -28,7 +29,7 @@ namespace StarWarsWebScraping
         }
 
         // Returns all characters articles
-        public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
+        public void GetAllCharacters(int numArticlePages = int.MaxValue)
         {
             //// checks if data exists in the database already
             //var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
@@ -44,22 +45,30 @@ namespace StarWarsWebScraping
 
             var articleUrls = _context.ArticleUrls.ToList();
 
-            var characters = articleUrls
-                .Select(x => GetCharacter(x))
-                .Where(x => x != null)
-                .ToList();
+            if (articleUrls.Count > 0)
+            {
+                var articleUrlsGroups = _drivers
+                .Select(x => articleUrls.Where(y => y.Id % _drivers.Count == x.Id));
 
-            return characters;
+                Task.WaitAll(articleUrlsGroups
+                    .Select(x => GetCharactersAsync(x, GetDriverFromIterator(x.First().Id)))
+                    .ToArray());
+            }
+        }
+
+        private async Task GetCharactersAsync(IEnumerable<ArticleUrl> articleUrls, ChromeDriver driver)
+        {
+            foreach (var articleUrl in articleUrls)
+            {
+                await Task.Run(() => GetCharacter(articleUrl, driver));
+            }
         }
 
         // gets a characters page and returns their information
-        private Character GetCharacter(ArticleUrl article)
+        private Character GetCharacter(ArticleUrl article, ChromeDriver driver)
         {
-            var driver = GetDriverFromIterator(article.Id);
-
             driver.Navigate().GoToUrl(article.Url);
 
-            // TODO: Fix this (checking if the article is a character article)
             try
             {
                 var infoTab = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
@@ -83,17 +92,17 @@ namespace StarWarsWebScraping
         }
 
         // Gets the urls of all articles on Wookieepedia
+        // TODO: I think this has to be synchronous
         private void GetAllArticleUrls(int numPages)
         {
             var urls = new List<string>();
+            var driver = _drivers.Select(x => x.Driver).First();
 
-            string nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
+            var nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
 
             var i = 0;
             while (nextPageUrl != null && i < numPages)
             {
-                var driver = GetDriverFromIterator(i);
-
                 var page = GetArticlePage(nextPageUrl, i == 0, driver);
                 urls.AddRange(page.ArticleUrls);
                 nextPageUrl = page.NextPageUrl;
@@ -133,6 +142,7 @@ namespace StarWarsWebScraping
             return (nextPageUrl, articleUrls);
         }
 
+        // TODO: Make this run in parallel with all drivers
         public void GetCharacterRelationships()
         {
             var characters = _context.Characters.ToList();
@@ -142,8 +152,6 @@ namespace StarWarsWebScraping
 
                 driver.Navigate().GoToUrl(characters[i].Url);
 
-                // TODO: benchmark linq to entities vs normal linq for hyperlink to character link
-                // TODO: find a way to narrow down the character text search
                 var characterHyperlinks = GetAllTagsFromBody(driver
                     .FindElementByClassName("mw-parser-output")
                     .GetAttribute("innerHTML")
@@ -179,7 +187,6 @@ namespace StarWarsWebScraping
         // htmlTag is just "href", "a", etc.
         private List<string> GetAllTagsFromBody(string htmlBody, string htmlTag, List<string> urls = null)
         {
-            // TODO: this code is bad and confusing
             urls ??= new List<string>();
             var hrefTagString = $"{htmlTag}=\"";
             if (!htmlBody.Contains(hrefTagString)) return urls;

@@ -25,14 +25,8 @@ namespace StarWarsWebScraping
             using var context = new StarWarsContext();
 
             var scraper = new Scraper(drivers, context);
-
-            context.Characters.AddRange(scraper.GetAllCharacters());
-            context.SaveChanges();
-
-            //// Make sure GetRelationships is called after GetCharacters because relationships requires db data
-            //// might want to fix this later
+            scraper.GetAllCharacters();
             scraper.GetCharacterRelationships();
-
             scraper.CloseDriver();
         }
     }

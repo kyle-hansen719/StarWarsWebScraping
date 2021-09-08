@@ -1,12 +1,11 @@
-﻿using OpenQA.Selenium;
-using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Remote;
+﻿using OpenQA.Selenium.Chrome;
 using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
+using System.Collections.Concurrent;
 
 namespace StarWarsWebScraping
 {
@@ -31,34 +30,27 @@ namespace StarWarsWebScraping
         // Returns all characters articles
         public void GetAllCharacters(int numArticlePages = int.MaxValue)
         {
-            //// checks if data exists in the database already
-            //var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
-            //var lastArticleCheckedId = _context.ArticleUrls.Where(x => x.Url == lastCharacterUrl).Select(x => x.Id).FirstOrDefault();
-            //var articleUrls = _context.ArticleUrls.Any() 
-            //    ? _context.ArticleUrls.Where(x => x.Id > lastArticleCheckedId).Select(x => x.Url).ToList() 
-            //    : GetAllArticleUrls(numArticlePages);
-
             if (!_context.ArticleUrls.Any())
             {
                 GetAllArticleUrls(numArticlePages);
             }
 
-            var articleUrls = _context.ArticleUrls.ToList();
+            var articleUrls = _context.ArticleUrls.FromSqlRaw(@"
+                SELECT		[Id], [Url]
+                FROM		dbo.ArticleUrls
+                WHERE		Id > (SELECT TOP 1 AU.Id FROM dbo.Characters C INNER JOIN dbo.ArticleUrls AU ON C.Url = AU.Url ORDER BY C.Id DESC)
+            ").OrderByDescending(x => x.Id).AsEnumerable();
 
-            if (articleUrls.Count > 0)
-            {
-                var articleUrlsGroups = _drivers
-                .Select(x => articleUrls.Where(y => y.Id % _drivers.Count == x.Id));
+            _articleUrls = new ConcurrentStack<ArticleUrl>(articleUrls);
 
-                Task.WaitAll(articleUrlsGroups
-                    .Select(x => GetCharactersAsync(x, GetDriverFromIterator(x.First().Id)))
-                    .ToArray());
-            }
+            Task.WaitAll(_drivers.Select(x => GetCharactersAsync(x.Driver)).ToArray());
         }
 
-        private async Task GetCharactersAsync(IEnumerable<ArticleUrl> articleUrls, ChromeDriver driver)
+        private ConcurrentStack<ArticleUrl> _articleUrls;
+
+        private async Task GetCharactersAsync(ChromeDriver driver)
         {
-            foreach (var articleUrl in articleUrls)
+            while (_articleUrls.TryPop(out var articleUrl))
             {
                 await Task.Run(() => GetCharacter(articleUrl, driver));
             }
@@ -142,26 +134,42 @@ namespace StarWarsWebScraping
             return (nextPageUrl, articleUrls);
         }
 
-        // TODO: Make this run in parallel with all drivers
+
+        // RELATIONSHIPS
         public void GetCharacterRelationships()
         {
-            var characters = _context.Characters.ToList();
-            for (var i = 0; i < characters.Count; i++)
+            var maxCharacterId = _context.Relationships.Max(x => x.CharacterId);
+            var characters = _context.Characters.Where(x => x.Id > maxCharacterId).OrderByDescending(x => x.Id).AsEnumerable();
+            
+            _characters = new ConcurrentStack<Character>(characters);
+
+            Task.WaitAll(_drivers.Select(x => GetRelationshipsAsync(x.Driver)).ToArray());
+        }
+
+        private ConcurrentStack<Character> _characters;
+
+        private async Task GetRelationshipsAsync(ChromeDriver driver)
+        {
+            while (_characters.TryPop(out var character))
             {
-                var driver = GetDriverFromIterator(i);
+                await Task.Run(() => GetRelationship(character, driver));
+            }
+        }
 
-                driver.Navigate().GoToUrl(characters[i].Url);
+        private void GetRelationship(Character character, ChromeDriver driver)
+        {
+            driver.Navigate().GoToUrl(character.Url);
 
-                var characterHyperlinks = GetAllTagsFromBody(driver
-                    .FindElementByClassName("mw-parser-output")
-                    .GetAttribute("innerHTML")
-                    .Replace("\n", "")
-                    .Replace("\r", ""), "href")
-                    .Select(x => $"('{x}')");
+            var characterHyperlinks = GetAllTagsFromBody(driver
+                .FindElementByClassName("mw-parser-output")
+                .GetAttribute("innerHTML")
+                .Replace("\n", "")
+                .Replace("\r", ""), "href")
+                .Select(x => $"('{x}')");
 
-                var query = $@"
+            var query = $@"
                     DECLARE @characterId INT
-                        SET @characterId = {characters[i].Id}
+                        SET @characterId = {character.Id}
                     IF OBJECT_ID('tempdb..#hyperlinks') IS NOT NULL DROP TABLE #hyperlinks
                     CREATE TABLE #hyperlinks (
                         hyperlink NVARCHAR(MAX)
@@ -180,8 +188,7 @@ namespace StarWarsWebScraping
                     WHERE
                         Url IN(SELECT* FROM #hyperlinks)";
 
-                _context.Database.ExecuteSqlRaw(query);
-            }
+            _context.Database.ExecuteSqlRaw(query);
         }
 
         // htmlTag is just "href", "a", etc.

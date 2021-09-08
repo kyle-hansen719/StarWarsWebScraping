@@ -1,16 +1,12 @@
-﻿using OpenQA.Selenium;
-using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Remote;
-using StarWarsWebScraping.Entities;
+﻿using OpenQA.Selenium.Chrome;
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
 
 namespace StarWarsWebScraping
 {
     class Program
     {
+        private static readonly int NumBrowserWindows = 4;
 
         static void Main(string[] args)
         {
@@ -21,7 +17,10 @@ namespace StarWarsWebScraping
             // Loads adblock to speed up page loading
             options.AddExtension(rootPath + "\\uBlock-Origin_v1.37.2.crx");
 
-            var drivers = Enumerable.Range(0, 4).Select(x => new DriverWithId { Id = x, Driver = new ChromeDriver(rootPath, options) }).ToList();
+            var drivers = Enumerable
+                .Range(0, NumBrowserWindows)
+                .Select(x => new DriverWithId { Id = x, Driver = new ChromeDriver(rootPath, options) })
+                .ToList();
             using var context = new StarWarsContext();
 
             var scraper = new Scraper(drivers, context);

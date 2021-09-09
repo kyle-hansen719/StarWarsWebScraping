@@ -6,6 +6,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace StarWarsWebScraping
 {
@@ -52,12 +53,12 @@ namespace StarWarsWebScraping
         {
             while (_articleUrls.TryPop(out var articleUrl))
             {
-                await Task.Run(() => GetCharacter(articleUrl, driver));
+                await Task.Run(async () => await GetCharacter(articleUrl, driver));
             }
         }
 
         // gets a characters page and returns their information
-        private Character GetCharacter(ArticleUrl article, ChromeDriver driver)
+        private async Task<Character> GetCharacter(ArticleUrl article, ChromeDriver driver)
         {
             driver.Navigate().GoToUrl(article.Url);
 
@@ -72,8 +73,8 @@ namespace StarWarsWebScraping
                     Url = article.Url
                 };
 
-                _context.Characters.Add(character);
-                _context.SaveChanges();
+                await _context.Characters.AddAsync(character);
+                await _context.SaveChangesAsync();
 
                 return character;
             }
@@ -138,7 +139,7 @@ namespace StarWarsWebScraping
         // RELATIONSHIPS
         public void GetCharacterRelationships()
         {
-            var maxCharacterId = _context.Relationships.Max(x => x.CharacterId);
+            var maxCharacterId = _context.Relationships.Any() ? _context.Relationships.Max(x => x.CharacterId) : 0;
             var characters = _context.Characters.Where(x => x.Id > maxCharacterId).OrderByDescending(x => x.Id).AsEnumerable();
             
             _characters = new ConcurrentStack<Character>(characters);
@@ -152,12 +153,15 @@ namespace StarWarsWebScraping
         {
             while (_characters.TryPop(out var character))
             {
-                await Task.Run(() => GetRelationship(character, driver));
+                await Task.Run(async () => await GetRelationship(character, driver));
             }
         }
 
-        private void GetRelationship(Character character, ChromeDriver driver)
+        private async Task GetRelationship(Character character, ChromeDriver driver)
         {
+            // get rid of this
+            //character = _context.Characters.Where(x => x.Id == 823).FirstOrDefault();
+
             driver.Navigate().GoToUrl(character.Url);
 
             var characterHyperlinks = GetAllTagsFromBody(driver
@@ -165,7 +169,26 @@ namespace StarWarsWebScraping
                 .GetAttribute("innerHTML")
                 .Replace("\n", "")
                 .Replace("\r", ""), "href")
-                .Select(x => $"('{x}')");
+                .Select(x => $"('{x}')")
+                .ToList();
+
+            // TODO: fix this (grouping hyperlink insert into to avoid limit of insert into 1000)
+            var hyperlinkGroups = new List<IEnumerable<string>>();
+            var pageLength = 999;
+
+            var insertHyperlinksStatement = new StringBuilder();
+            for (int i = 0; i < characterHyperlinks.Count; i++)
+            {
+                if (i % pageLength == 0)
+                {
+                    // Removes last comma
+                    if (insertHyperlinksStatement.Length > 0) insertHyperlinksStatement.Remove(insertHyperlinksStatement.Length - 1, 1);
+                    insertHyperlinksStatement.Append("INSERT INTO #hyperlinks (hyperlink) VALUES ");
+                }
+
+                insertHyperlinksStatement.Append(characterHyperlinks[i] + ",");
+            }
+            if (insertHyperlinksStatement.Length > 0) insertHyperlinksStatement.Remove(insertHyperlinksStatement.Length - 1, 1);
 
             var query = $@"
                     DECLARE @characterId INT
@@ -175,8 +198,7 @@ namespace StarWarsWebScraping
                         hyperlink NVARCHAR(MAX)
                     );
 
-                    INSERT INTO #hyperlinks (hyperlink)
-                    	VALUES {string.Join(',', characterHyperlinks)}
+                    {insertHyperlinksStatement}
                     
                     INSERT INTO
                         dbo.Relationships(CharacterId, HyperlinkCharacterId)
@@ -188,7 +210,8 @@ namespace StarWarsWebScraping
                     WHERE
                         Url IN(SELECT* FROM #hyperlinks)";
 
-            _context.Database.ExecuteSqlRaw(query);
+            using var context = new StarWarsContext();
+            await context.Database.ExecuteSqlRawAsync(query);
         }
 
         // htmlTag is just "href", "a", etc.
@@ -205,11 +228,6 @@ namespace StarWarsWebScraping
             urls.Add(WookiepeediaBaseUrl + htmlBody.Substring(openingIndex, urlLength));
 
             return GetAllTagsFromBody(htmlBody.Substring(openingIndex + urlLength), htmlTag, urls);
-        }
-
-        private ChromeDriver GetDriverFromIterator(int iterator)
-        {
-            return _drivers[iterator % _drivers.Count].Driver;
         }
     }
 }

@@ -144,7 +144,11 @@ namespace StarWarsWebScraping
             
             _characters = new ConcurrentStack<Character>(characters);
 
-            Task.WaitAll(_drivers.Select(x => GetRelationshipsAsync(x.Driver)).ToArray());
+            // Closes all drivers except for the first.
+            _drivers.Where(x => x.Id != _drivers[0].Id).ToList().ForEach(x => x.Driver.Close());
+            
+            //Task.WaitAll(_drivers.Select(x => GetRelationshipsAsync(x.Driver)).ToArray());
+            GetRelationshipsAsync(_drivers[0].Driver).Wait();
         }
 
         private ConcurrentStack<Character> _characters;

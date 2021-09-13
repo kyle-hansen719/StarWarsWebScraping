@@ -1,12 +1,12 @@
 ﻿using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Remote;
-using StarWarsWebScraping.Entities;
 using System;
+using System.Linq;
 
 namespace StarWarsWebScraping
 {
     class Program
     {
+        private static readonly int NumBrowserWindows = 4;
 
         static void Main(string[] args)
         {
@@ -16,19 +16,23 @@ namespace StarWarsWebScraping
             var rootPath = Environment.CurrentDirectory.Replace("\\bin\\Debug\\netcoreapp3.1", "");
             // Loads adblock to speed up page loading
             options.AddExtension(rootPath + "\\uBlock-Origin_v1.37.2.crx");
-            var driver = new ChromeDriver(rootPath, options);
-            
+
+            var drivers = Enumerable
+                .Range(0, NumBrowserWindows)
+                .Select(x => new DriverWithId { Id = x, Driver = new ChromeDriver(rootPath, options) })
+                .ToList();
             using var context = new StarWarsContext();
 
-            var scraper = new Scraper(driver, context);
-
-            var characters = scraper.GetAllCharacters();
-
-            // Make sure GetRelationships is called after GetCharacters because relationships requires db data
-            // might want to fix this later
+            var scraper = new Scraper(drivers, context);
+            scraper.GetAllCharacters();
             scraper.GetCharacterRelationships();
-
             scraper.CloseDriver();
         }
+    }
+
+    public class DriverWithId
+    {
+        public ChromeDriver Driver { get; set; }
+        public int Id { get; set; }
     }
 }

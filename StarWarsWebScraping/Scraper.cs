@@ -1,69 +1,80 @@
-﻿using OpenQA.Selenium;
-using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Remote;
+﻿using OpenQA.Selenium.Chrome;
 using StarWarsWebScraping.Entities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
+using System.Text;
 
 namespace StarWarsWebScraping
 {
     class Scraper
     {
-        private readonly RemoteWebDriver _driver;
+        private readonly List<DriverWithId> _drivers;
         private readonly StarWarsContext _context;
 
         private readonly string WookiepeediaBaseUrl = "https://starwars.fandom.com";
 
-        public Scraper(RemoteWebDriver driver, StarWarsContext context)
+        public Scraper(List<DriverWithId> drivers, StarWarsContext context)
         {
-            _driver = driver;
+            _drivers = drivers;
             _context = context;
         }
 
         public void CloseDriver()
         {
-            _driver.Close();
+            _drivers.ForEach(x => x.Driver.Close());
         }
 
         // Returns all characters articles
-        public List<Character> GetAllCharacters(int numArticlePages = int.MaxValue)
+        public void GetAllCharacters(int numArticlePages = int.MaxValue)
         {
-            // checks if data exists in the database already
-            var lastCharacterUrl = _context.Characters.OrderBy(x => x.Id).Select(x => x.Url).LastOrDefault();
-            var lastArticleCheckedId = _context.ArticleUrls.Where(x => x.Url == lastCharacterUrl).Select(x => x.Id).FirstOrDefault();
-            var articleUrls = _context.ArticleUrls.Any() 
-                ? _context.ArticleUrls.Where(x => x.Id > lastArticleCheckedId).Select(x => x.Url).ToList() 
-                : GetAllArticleUrls(numArticlePages);
+            if (!_context.ArticleUrls.Any())
+            {
+                GetAllArticleUrls(numArticlePages);
+            }
 
-            var characters = articleUrls
-                .Select(x => GetCharacter(x))
-                .Where(x => x != null)
-                .ToList();
+            var articleUrls = _context.ArticleUrls.FromSqlRaw(@"
+                SELECT		[Id], [Url]
+                FROM		dbo.ArticleUrls
+                WHERE		Id > (SELECT TOP 1 AU.Id FROM dbo.Characters C INNER JOIN dbo.ArticleUrls AU ON C.Url = AU.Url ORDER BY C.Id DESC)
+            ").OrderByDescending(x => x.Id).AsEnumerable();
 
-            return characters;
+            _articleUrls = new ConcurrentStack<ArticleUrl>(articleUrls);
+
+            Task.WaitAll(_drivers.Select(x => GetCharactersAsync(x.Driver)).ToArray());
+        }
+
+        private ConcurrentStack<ArticleUrl> _articleUrls;
+
+        private async Task GetCharactersAsync(ChromeDriver driver)
+        {
+            while (_articleUrls.TryPop(out var articleUrl))
+            {
+                await Task.Run(async () => await GetCharacter(articleUrl, driver));
+            }
         }
 
         // gets a characters page and returns their information
-        private Character GetCharacter(string url)
+        private async Task<Character> GetCharacter(ArticleUrl article, ChromeDriver driver)
         {
-            _driver.Navigate().GoToUrl(url);
+            driver.Navigate().GoToUrl(article.Url);
 
-            // TODO: Fix this (checking if the article is a character article)
             try
             {
-                var infoTab = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
+                var infoTab = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div/aside");
                 if (!infoTab.Text.Contains("Gender")) return null;
 
                 var character = new Character
                 {
-                    CharacterName = _driver.FindElementById("firstHeading").Text,
-                    Url = url
+                    CharacterName = driver.FindElementById("firstHeading").Text,
+                    Url = article.Url
                 };
 
-                _context.Characters.Add(character);
-                _context.SaveChanges();
+                await _context.Characters.AddAsync(character);
+                await _context.SaveChangesAsync();
 
                 return character;
             }
@@ -74,16 +85,18 @@ namespace StarWarsWebScraping
         }
 
         // Gets the urls of all articles on Wookieepedia
-        private List<string> GetAllArticleUrls(int numPages)
+        // TODO: I think this has to be synchronous
+        private void GetAllArticleUrls(int numPages)
         {
             var urls = new List<string>();
+            var driver = _drivers.Select(x => x.Driver).First();
 
-            string nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
+            var nextPageUrl = $"{WookiepeediaBaseUrl}/wiki/Special:AllPages";
 
             var i = 0;
             while (nextPageUrl != null && i < numPages)
             {
-                var page = GetArticlePage(nextPageUrl, i == 0);
+                var page = GetArticlePage(nextPageUrl, i == 0, driver);
                 urls.AddRange(page.ArticleUrls);
                 nextPageUrl = page.NextPageUrl;
                 i += 1;
@@ -93,28 +106,27 @@ namespace StarWarsWebScraping
             _context.SaveChanges();
 
             Console.WriteLine("Finished Getting All Urls");
-            return urls;
         }
 
         // Gets a single page of urls and returns the url to the next page
-        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url, bool isFirstPage)
+        private (string NextPageUrl, IEnumerable<string> ArticleUrls) GetArticlePage(string url, bool isFirstPage, ChromeDriver driver)
         {
-            _driver.Navigate().GoToUrl(url);
+            driver.Navigate().GoToUrl(url);
 
             string nextPageUrl = null;
             try
             {
                 // TODO: replace this xpath call with another selector if i can
-                nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
+                nextPageUrl = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[2]").GetAttribute("href");
             }
             catch
             {
                 // On the first page, the next page button is this but on the last page this is the previous button so I need to only set next page to this
                 // when this is the first page
-                if (isFirstPage) nextPageUrl = _driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
+                if (isFirstPage) nextPageUrl = driver.FindElementByXPath("//*[@id=\"mw-content-text\"]/div[2]/a[1]").GetAttribute("href");
             }
 
-            var articleUrls = GetAllTagsFromBody(_driver
+            var articleUrls = GetAllTagsFromBody(driver
                 .FindElementByClassName("mw-allpages-chunk")
                 .GetAttribute("innerHTML")
                 .Replace("\n", "")
@@ -123,23 +135,62 @@ namespace StarWarsWebScraping
             return (nextPageUrl, articleUrls);
         }
 
+
+        // RELATIONSHIPS
         public void GetCharacterRelationships()
         {
-            var characters = _context.Characters.ToList();
-            foreach (var character in characters)
+            var maxCharacterId = _context.Relationships.Any() ? _context.Relationships.Max(x => x.CharacterId) : 0;
+            var characters = _context.Characters.Where(x => x.Id > maxCharacterId).OrderByDescending(x => x.Id).AsEnumerable();
+            
+            _characters = new ConcurrentStack<Character>(characters);
+
+            Task.WaitAll(_drivers.Select(x => GetRelationshipsAsync(x.Driver)).ToArray());
+        }
+
+        private ConcurrentStack<Character> _characters;
+
+        private async Task GetRelationshipsAsync(ChromeDriver driver)
+        {
+            while (_characters.TryPop(out var character))
             {
-                _driver.Navigate().GoToUrl(character.Url);
+                await Task.Run(async () => await GetRelationship(character, driver));
+            }
+        }
 
-                // TODO: benchmark linq to entities vs normal linq for hyperlink to character link
-                // TODO: find a way to narrow down the character text search
-                var characterHyperlinks = GetAllTagsFromBody(_driver
-                    .FindElementByClassName("mw-parser-output")
-                    .GetAttribute("innerHTML")
-                    .Replace("\n", "")
-                    .Replace("\r", ""), "href")
-                    .Select(x => $"('{x}')");
+        private async Task GetRelationship(Character character, ChromeDriver driver)
+        {
+            // get rid of this
+            //character = _context.Characters.Where(x => x.Id == 823).FirstOrDefault();
 
-                var query = $@"
+            driver.Navigate().GoToUrl(character.Url);
+
+            var characterHyperlinks = GetAllTagsFromBody(driver
+                .FindElementByClassName("mw-parser-output")
+                .GetAttribute("innerHTML")
+                .Replace("\n", "")
+                .Replace("\r", ""), "href")
+                .Select(x => $"('{x}')")
+                .ToList();
+
+            // TODO: fix this (grouping hyperlink insert into to avoid limit of insert into 1000)
+            var hyperlinkGroups = new List<IEnumerable<string>>();
+            var pageLength = 999;
+
+            var insertHyperlinksStatement = new StringBuilder();
+            for (int i = 0; i < characterHyperlinks.Count; i++)
+            {
+                if (i % pageLength == 0)
+                {
+                    // Removes last comma
+                    if (insertHyperlinksStatement.Length > 0) insertHyperlinksStatement.Remove(insertHyperlinksStatement.Length - 1, 1);
+                    insertHyperlinksStatement.Append("INSERT INTO #hyperlinks (hyperlink) VALUES ");
+                }
+
+                insertHyperlinksStatement.Append(characterHyperlinks[i] + ",");
+            }
+            if (insertHyperlinksStatement.Length > 0) insertHyperlinksStatement.Remove(insertHyperlinksStatement.Length - 1, 1);
+
+            var query = $@"
                     DECLARE @characterId INT
                         SET @characterId = {character.Id}
                     IF OBJECT_ID('tempdb..#hyperlinks') IS NOT NULL DROP TABLE #hyperlinks
@@ -147,8 +198,7 @@ namespace StarWarsWebScraping
                         hyperlink NVARCHAR(MAX)
                     );
 
-                    INSERT INTO #hyperlinks (hyperlink)
-                    	VALUES {string.Join(',', characterHyperlinks)}
+                    {insertHyperlinksStatement}
                     
                     INSERT INTO
                         dbo.Relationships(CharacterId, HyperlinkCharacterId)
@@ -160,14 +210,13 @@ namespace StarWarsWebScraping
                     WHERE
                         Url IN(SELECT* FROM #hyperlinks)";
 
-                _context.Database.ExecuteSqlRaw(query);
-            }
+            using var context = new StarWarsContext();
+            await context.Database.ExecuteSqlRawAsync(query);
         }
 
         // htmlTag is just "href", "a", etc.
         private List<string> GetAllTagsFromBody(string htmlBody, string htmlTag, List<string> urls = null)
         {
-            // TODO: this code is bad and confusing
             urls ??= new List<string>();
             var hrefTagString = $"{htmlTag}=\"";
             if (!htmlBody.Contains(hrefTagString)) return urls;
